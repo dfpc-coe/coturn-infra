@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euxo pipefail
+
+# COTURN startup script
+# This script configures and starts the COTURN server
+
+cd /
+
+# Set default log level
+LOGLEVEL=${LOG_LEVEL:-info}
+
+# Configure coturn if environment variables are set
+if [ -n "${TURN_SECRET:-}" ]; then
+    echo "TURN_SECRET is set, configuring coturn"
+fi
+
+if [ -n "${TURN_REALM:-}" ]; then
+    echo "TURN_REALM is set to ${TURN_REALM}"
+fi
+
+# Start coturn server with host networking
+exec turnserver -c /etc/coturn/coturn.conf -f

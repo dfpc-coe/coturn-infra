@@ -1,0 +1,38 @@
+{
+    "name": "@tak-ps/coturn",
+    "type": "module",
+    "private": true,
+    "version": "1.0.0",
+    "description": "Infrastructure to support a TURN/STUN server for WebRTC NAT traversal",
+    "main": "index.js",
+    "scripts": {
+        "lint": "eslint cloudformation/"
+    },
+    "engines": {
+        "node": ">= 22"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/dfpc-coe/coturn-infra.git"
+    },
+    "author": "Nick Ingalls <nick@ingalls.ca>",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/dfpc-coe/coturn-infra/issues"
+    },
+    "homepage": "https://github.com/dfpc-coe/coturn-infra#readme",
+    "dependencies": {
+        "@openaddresses/batch-alarms": "^5.0.0",
+        "@openaddresses/batch-error": "^2.13.1",
+        "@openaddresses/batch-schema": "^10.19.0",
+        "@openaddresses/cloudfriend": "^7.0.0",
+        "@openaddresses/deploy": "^10.0.0",
+        "@sinclair/typebox": "^0.34.41"
+    },
+    "devDependencies": {
+        "@types/node": "^25.0.0",
+        "eslint": "^10.0.0",
+        "typescript": "^6.0.0",
+        "typescript-eslint": "^8.12.2"
+    }
+}
