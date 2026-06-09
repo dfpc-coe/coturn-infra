@@ -296,4 +296,7 @@ const Outputs = {
     }
 };
 
-export default Resources;
+export default {
+    Resources,
+    Outputs
+}
