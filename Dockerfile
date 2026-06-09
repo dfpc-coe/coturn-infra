@@ -33,3 +33,5 @@ COPY coturn.conf /etc/coturn/
 COPY start /
 
 ENTRYPOINT [ "/start" ]
+
+ENTRYPOINT [ "/start" ]
