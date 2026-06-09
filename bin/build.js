@@ -98,8 +98,8 @@ function ensureBinfmt() {
             docker run \
                 --privileged \
                 --rm \
-                quay.io/binfmt:qemu-setup
-
+                tonistiigi/binfmt \
+                --install "$\{DOCKER_BINFMTS\}"
         `, (err) => {
             if (err) return reject(err);
             return resolve();
@@ -111,19 +111,18 @@ function ensureBinfmt() {
 }
 
 function architectures(platforms) {
-    return platforms.split(',').map((arch) => {
-        const parts = arch.split('/');
-        if (parts[1] === 'amd64') return 'amd64';
-        if (parts[1] === 'arm64') return 'arm64';
-        return parts[1];
-    }).join(',');
+    return [...new Set(platforms.split(',').map((platform) => {
+        return platform.trim().split('/').at(-1);
+    }).filter(Boolean))].join(',');
 }
 
 function sha() {
-    try {
-        const CP = require('child_process');
-        return CP.execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-    } catch {
-        return 'dev';
-    }
+    const git = CP.spawnSync('git', [
+        '--git-dir', new URL('../.git', import.meta.url).pathname,
+        'rev-parse', 'HEAD'
+    ]);
+
+    if (!git.stdout) throw Error('Is this a git repo? Could not determine GitSha');
+    return String(git.stdout).replace(/\n/g, '');
+
 }
