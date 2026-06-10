@@ -146,7 +146,8 @@ const Resources = {
             Comment: cf.join(' ', [cf.stackName, 'DNS Entry']),
             TTL: '60',
             ResourceRecords: [cf.ref('CoturnEIPSubnetA')]
-        }
+        },
+        DependsOn: ['CoturnEIPAssociation']
     },
     CoturnEIPSubnetA: {
         Type: 'AWS::EC2::EIP',
@@ -167,9 +168,51 @@ const Resources = {
         Type: 'AWS::EC2::EIPAssociation',
         Properties: {
             AllocationId: cf.ref('CoturnEIPSubnetA'),
-            NetworkInterfaceId: cf.getAtt('CoturnENI', 'NetworkInterfaceId')
+            NetworkInterfaceId: cf.getAtt('CoturnENI', 'PrimaryNetworkInterfaceId')
         },
         DependsOn: ['CoturnENI']
+    },
+    ContainerInstanceRole: {
+        Type: 'AWS::IAM::Role',
+        Properties: {
+            AssumeRolePolicyDocument: {
+                Version: '2012-10-17',
+                Statement: [{
+                    Effect: 'Allow',
+                    Principal: {
+                        Service: 'ec2.amazonaws.com'
+                    },
+                    Action: 'sts:AssumeRole'
+                }]
+            },
+            Policies: [{
+                PolicyName: cf.join('-', [cf.stackName, 'eip-association']),
+                PolicyDocument: {
+                    Statement: [{
+                        Effect: 'Allow',
+                        Action: [
+                            'ec2:AssociateAddress',
+                            'ec2:DescribeAddresses',
+                            'ec2:DescribeInstances'
+                        ],
+                        Resource: '*'
+                    }]
+                }
+            }],
+            ManagedPolicyArns: [
+                cf.join(['arn:', cf.partition, ':iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role']),
+                cf.join(['arn:', cf.partition, ':iam::aws:policy/AmazonSSMManagedInstanceCore'])
+            ],
+            Path: '/service-role/'
+        }
+    },
+    ContainerInstanceProfile: {
+        Type: 'AWS::IAM::InstanceProfile',
+        Properties: {
+            Path: '/service-role/',
+            Roles: [cf.ref('ContainerInstanceRole')]
+        },
+        DependsOn: ['ContainerInstanceRole']
     },
     CoturnLaunchTemplate: {
         Type: 'AWS::EC2::LaunchTemplate',
@@ -179,7 +222,7 @@ const Resources = {
                 ImageId: cf.ref('AWS::NoValue'),
                 InstanceType: 't3.medium',
                 IamInstanceProfile: {
-                    Name: cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-ecs-instance-profile']))
+                    Arn: cf.getAtt('ContainerInstanceProfile', 'Arn')
                 },
                 SecurityGroupIds: [cf.ref('CoturnSecurityGroup')],
                 UserData: cf.base64(cf.join([
