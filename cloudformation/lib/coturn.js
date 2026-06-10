@@ -143,9 +143,9 @@ export default {
                 Name: cf.join(['turn', '.', cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-hosted-zone-name']))]),
                 Comment: cf.join(' ', [cf.stackName, 'DNS Entry']),
                 TTL: '60',
-                ResourceRecords: [cf.ref('CoturnEIPSubnetA')]
+                ResourceRecords: [cf.getAtt('CoturnENI', 'PrimaryPrivateIpAddress')]
             },
-            DependsOn: ['CoturnEIPAssociation']
+            DependsOn: ['CoturnENI', 'CoturnEIPAssociation']
         },
         CoturnEIPSubnetA: {
             Type: 'AWS::EC2::EIP',
