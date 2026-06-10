@@ -329,6 +329,19 @@ const Resources = {
             }]
         },
         DependsOn: ['CoturnLaunchTemplate']
+    },
+    CoturnSecret: {
+        Type: 'AWS::SecretsManager::Secret',
+        DeletionPolicy: 'Retain',
+        Properties: {
+            Description: cf.join([cf.stackName, ' COTURN Secret']),
+            GenerateSecretString: {
+                ExcludePunctuation: true,
+                PasswordLength: 32
+            },
+            Name: cf.join(['tak-cloudtak-', cf.ref('Environment'), '/coturn/secret']),
+            KmsKeyId: cf.ref('KMS')
+        }
     }
 };
 
