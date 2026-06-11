@@ -1,4 +1,5 @@
 import cf from '@openaddresses/cloudfriend';
+import fs from 'node:fs';
 
 const PORTS = [{
     Name: 'TURN-TCP',
@@ -97,8 +98,8 @@ export default {
             Type: 'AWS::ECS::TaskDefinition',
             Properties: {
                 Family: cf.stackName,
-                Cpu: 256,
-                Memory: 512,
+                Cpu: 2048,
+                Memory: 4000,
                 NetworkMode: 'host',
                 RequiresCompatibilities: ['EC2'],
                 ExecutionRoleArn: cf.getAtt('CoturnTaskRole', 'Arn'),
@@ -145,9 +146,9 @@ export default {
                 TTL: '60',
                 ResourceRecords: [cf.getAtt('CoturnENI', 'PrimaryPrivateIpAddress')]
             },
-            DependsOn: ['CoturnENI', 'CoturnEIPAssociation']
+            DependsOn: ['CoturnENI']
         },
-        CoturnEIPSubnetA: {
+        ELBEIPSubnetA: {
             Type: 'AWS::EC2::EIP',
             Properties: {
                 Domain: 'vpc'
@@ -161,14 +162,6 @@ export default {
                 GroupSet: [cf.ref('CoturnSecurityGroup')],
                 SourceDestCheck: false
             }
-        },
-        CoturnEIPAssociation: {
-            Type: 'AWS::EC2::EIPAssociation',
-            Properties: {
-                AllocationId: cf.ref('CoturnEIPSubnetA'),
-                NetworkInterfaceId: cf.getAtt('CoturnENI', 'NetworkInterfaceId')
-            },
-            DependsOn: ['CoturnENI']
         },
         ContainerInstanceRole: {
             Type: 'AWS::IAM::Role',
@@ -218,88 +211,17 @@ export default {
                 LaunchTemplateName: cf.stackName,
                 LaunchTemplateData: {
                     ImageId: cf.ref('ECSOptimizedAMI'),
-                    InstanceType: 't3.medium',
+                    InstanceType: 't4g.medium',
                     IamInstanceProfile: {
                         Arn: cf.getAtt('ContainerInstanceProfile', 'Arn')
                     },
                     SecurityGroupIds: [cf.ref('CoturnSecurityGroup')],
-                    UserData: cf.base64(cf.join([
-                        '#!/bin/bash\n',
-                        'set -euxo pipefail\n',
-                        '\n',
-                        '# Configure sysctl for WebRTC\n',
-                        'cat <<EOF > /etc/sysctl.d/99-coturn.conf\n',
-                        'net.core.rmem_max = 8388608\n',
-                        'net.core.rmem_default = 4194304\n',
-                        'net.core.wmem_max = 8388608\n',
-                        'net.core.wmem_default = 4194304\n',
-                        'EOF\n',
-                        '\n',
-                        'sysctl --system || true\n',
-                        '\n',
-                        '# Install AWS CLI if not present\n',
-                        'if ! command -v aws >/dev/null 2>&1; then\n',
-                        '    if command -v dnf >/dev/null 2>&1; then\n',
-                        '        dnf install -y awscli || true\n',
-                        '    elif command -v yum >/dev/null 2>&1; then\n',
-                        '        yum install -y awscli || true\n',
-                        '    fi\n',
-                        'fi\n',
-                        '\n',
-                        '# Configure EIP association script\n',
-                        'if command -v aws >/dev/null 2>&1; then\n',
-                        '    cat <<EOF > /usr/local/bin/coturn-eip-association.sh\n',
-                        '#!/bin/bash\n',
-                        'set -euo pipefail\n',
-                        '\n',
-                        'wait_for_tcp_port() {\n',
-                        '    timeout 1 bash -c \'exec 3<>"/dev/tcp/$1/$2"\' _ "$1" "$2" >/dev/null 2>&1\n',
-                        '}\n',
-                        '\n',
-                        'token=$(curl --fail --silent --show-error --request PUT "http://169.254.169.254/latest/api/token" --header "X-aws-ec2-metadata-token-ttl-seconds: 21600")\n',
-                        'instance_id=$(curl --fail --silent --show-error --header "X-aws-ec2-metadata-token: $token" "http://169.254.169.254/latest/meta-data/instance-id")\n',
-                        '\n',
-                        'for attempt in {1..60}; do\n',
-                        '    if ! wait_for_tcp_port 127.0.0.1 3478; then\n',
-                        '        echo "Attempt $attempt: waiting for coturn listener on 127.0.0.1:3478"\n',
-                        '        sleep 10\n',
-                        '        continue\n',
-                        '    fi\n',
-                        '\n',
-                        '    if aws ec2 associate-address --region "$1" --instance-id "$instance_id" --allocation-id "$2" --allow-reassociation; then\n',
-                        '        exit 0\n',
-                        '    fi\n',
-                        '\n',
-                        '    sleep 10\n',
-                        'done\n',
-                        '\n',
-                        'echo "warning: failed to associate EIP after retries"\n',
-                        'exit 1\n',
-                        'EOF\n',
-                        '\n',
-                        'chmod 755 /usr/local/bin/coturn-eip-association.sh\n',
-                        '\n',
-                        'cat <<EOF > /etc/systemd/system/coturn-eip-association.service\n',
-                        '[Unit]\n',
-                        'Description=Associate coturn EIP after local task readiness\n',
-                        'Wants=network-online.target docker.service ecs.service\n',
-                        'After=network-online.target docker.service ecs.service\n',
-                        '\n',
-                        '[Service]\n',
-                        'Type=simple\n',
-                        'ExecStart=/usr/local/bin/coturn-eip-association.sh ${AWS::Region} ${AllocationId}\n',
-                        'Restart=on-failure\n',
-                        'RestartSec=10s\n',
-                        '\n',
-                        '[Install]\n',
-                        'WantedBy=multi-user.target\n',
-                        'EOF\n',
-                        '\n',
-                        'systemctl daemon-reload\n',
-                        'systemctl enable coturn-eip-association.service\n',
-                        'systemctl start --no-block coturn-eip-association.service\n',
-                        'echo "Coturn EIP association service queued; user-data can exit while it waits for port 3478."\n',
-                        'fi\n'
+                    UserData: cf.base64(cf.sub([
+                        fs.readFileSync(new URL('./coturn.sh', import.meta.url), 'utf8'),
+                        {
+                            AllocationId: cf.getAtt('ELBEIPSubnetA', 'AllocationId'),
+                            ClusterName: cf.join(['tak-vpc-', cf.ref('Environment'), '-media'])
+                        }
                     ]))
                 }
             }
@@ -318,7 +240,7 @@ export default {
                 DesiredCapacity: 1,
                 LaunchTemplate: {
                     LaunchTemplateId: cf.ref('CoturnLaunchTemplate'),
-                    Version: '$Latest'
+                    Version: cf.getAtt('CoturnLaunchTemplate', 'LatestVersionNumber')
                 },
                 Tags: [{
                     Key: 'Name',
@@ -345,7 +267,7 @@ export default {
     Outputs: {
         CoturnEIP: {
             Description: 'COTURN EIP Address',
-            Value: cf.ref('CoturnEIPSubnetA')
+            Value: cf.ref('ELBEIPSubnetA')
         }
     }
 }
