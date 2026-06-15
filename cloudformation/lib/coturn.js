@@ -25,21 +25,18 @@ const PORTS = [{
     Protocol: 'udp',
     Description: 'TURN server TLS UDP',
     Enabled: true
-},{
-    Name: 'RELAY-START',
-    Port: 49152,
-    Protocol: 'udp',
-    Description: 'TURN relay port range start',
-    Enabled: true
-},{
-    Name: 'RELAY-END',
-    Port: 65535,
-    Protocol: 'udp',
-    Description: 'TURN relay port range end',
-    Enabled: true
 }].filter((p) => {
     return p.Enabled;
 });
+
+// TURN relay port range (coturn min-port/max-port). Opened as a single
+// contiguous range rather than per-port. With host networking the relay
+// ports bind directly, so they are not declared as ECS PortMappings.
+const RELAY_PORT_RANGE = {
+    From: 49152,
+    To: 65535,
+    Protocol: 'udp'
+};
 
 export default {
     Parameters: {
@@ -83,15 +80,24 @@ export default {
                 GroupName: cf.join('-', [cf.stackName, 'sg']),
                 GroupDescription: 'Allow COTURN traffic',
                 VpcId: cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-vpc'])),
-                SecurityGroupIngress: PORTS.map((port) => {
-                    return {
-                        IpProtocol: port.Protocol,
-                        FromPort: port.Port,
-                        ToPort: port.Port,
+                SecurityGroupIngress: [
+                    ...PORTS.map((port) => {
+                        return {
+                            IpProtocol: port.Protocol,
+                            FromPort: port.Port,
+                            ToPort: port.Port,
+                            CidrIp: '0.0.0.0/0',
+                            Description: port.Description
+                        };
+                    }),
+                    {
+                        IpProtocol: RELAY_PORT_RANGE.Protocol,
+                        FromPort: RELAY_PORT_RANGE.From,
+                        ToPort: RELAY_PORT_RANGE.To,
                         CidrIp: '0.0.0.0/0',
-                        Description: port.Description
-                    };
-                })
+                        Description: 'TURN relay port range'
+                    }
+                ]
             }
         },
         CoturnTaskDefinition: {
