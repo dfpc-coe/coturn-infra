@@ -120,6 +120,7 @@ export default {
                         { Name: 'Environment', Value: cf.ref('Environment') },
                         { Name: 'TURN_SECRET', Value: cf.sub('{{resolve:secretsmanager:tak-cloudtak-${Environment}/coturn/secret:SecretString::AWSCURRENT}}') },
                         { Name: 'TURN_REALM', Value: cf.join(['turn.', cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-hosted-zone-name']))]) },
+                        { Name: 'EXTERNAL_IP', Value: cf.ref('ELBEIPSubnetA') },
                         { Name: 'AWS_DEFAULT_REGION', Value: cf.region },
                         { Name: 'AWS_REGION', Value: cf.region }
                     ],
@@ -144,23 +145,14 @@ export default {
                 Name: cf.join(['turn', '.', cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-hosted-zone-name']))]),
                 Comment: cf.join(' ', [cf.stackName, 'DNS Entry']),
                 TTL: '60',
-                ResourceRecords: [cf.getAtt('CoturnENI', 'PrimaryPrivateIpAddress')]
+                ResourceRecords: [cf.ref('ELBEIPSubnetA')]
             },
-            DependsOn: ['CoturnENI']
+            DependsOn: ['ELBEIPSubnetA']
         },
         ELBEIPSubnetA: {
             Type: 'AWS::EC2::EIP',
             Properties: {
                 Domain: 'vpc'
-            }
-        },
-        CoturnENI: {
-            Type: 'AWS::EC2::NetworkInterface',
-            Properties: {
-                Description: 'COTURN ENI for EIP association',
-                SubnetId: cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-subnet-public-a'])),
-                GroupSet: [cf.ref('CoturnSecurityGroup')],
-                SourceDestCheck: false
             }
         },
         ContainerInstanceRole: {

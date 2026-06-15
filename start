@@ -1,22 +1,33 @@
-#!/bin/bash
-set -euxo pipefail
+#!/bin/sh
+set -eu
 
 # COTURN startup script
-# This script configures and starts the COTURN server
+# Renders the coturn configuration from environment variables (coturn does not
+# expand ${VAR} syntax in its config file) and starts the TURN/STUN server.
 
-cd /
+: "${TURN_SECRET:?TURN_SECRET env var is required}"
+: "${TURN_REALM:?TURN_REALM env var is required}"
 
-# Set default log level
-LOGLEVEL=${LOG_LEVEL:-info}
-
-# Configure coturn if environment variables are set
-if [ -n "${TURN_SECRET:-}" ]; then
-    echo "TURN_SECRET is set, configuring coturn"
+# Public IPv4 used to advertise TURN relay candidates (required behind EIP/NAT).
+# Provided by the task definition; falls back to EC2 instance metadata.
+EXTERNAL_IP="${EXTERNAL_IP:-}"
+if [ -z "${EXTERNAL_IP}" ]; then
+    TOKEN="$(curl -fsS -X PUT 'http://169.254.169.254/latest/api/token' \
+        -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null || true)"
+    EXTERNAL_IP="$(curl -fsS -H "X-aws-ec2-metadata-token: ${TOKEN}" \
+        'http://169.254.169.254/latest/meta-data/public-ipv4' 2>/dev/null || true)"
 fi
 
-if [ -n "${TURN_REALM:-}" ]; then
-    echo "TURN_REALM is set to ${TURN_REALM}"
+export TURN_SECRET TURN_REALM EXTERNAL_IP
+
+envsubst '${TURN_SECRET} ${TURN_REALM} ${EXTERNAL_IP}' \
+    < /etc/coturn/turnserver.conf.template \
+    > /etc/coturn/turnserver.conf
+
+# Drop the external-ip directive entirely if no public IP could be resolved.
+if [ -z "${EXTERNAL_IP}" ]; then
+    sed -i '/^external-ip=$/d' /etc/coturn/turnserver.conf
 fi
 
 # Start coturn server with host networking
-exec turnserver -c /etc/coturn/coturn.conf -f
+exec turnserver -c /etc/coturn/turnserver.conf
