@@ -1,5 +1,6 @@
 import cf from '@openaddresses/cloudfriend';
 import fs from 'node:fs';
+import { URL } from 'node:url';
 
 const PORTS = [{
     Name: 'TURN-TCP',
@@ -40,13 +41,34 @@ const RELAY_PORT_RANGE = {
 
 export default {
     Parameters: {
+        InstanceType: {
+            Description: 'EC2 instance type for the coturn ECS capacity provider',
+            Type: 'String',
+            Default: 't4g.medium'
+        },
         ECSOptimizedAMI: {
             Description: 'ARM64 ECS-optimized Amazon Linux 2023 AMI ID',
             Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>',
             Default: '/aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended/image_id'
         },
+        EnableExecute: {
+            Description: 'Allow SSH into docker container - should only be enabled for limited debugging',
+            Type: 'String',
+            AllowedValues: ['true', 'false'],
+            Default: 'false'
+        }
     },
     Resources: {
+        CoturnCluster: {
+            Type: 'AWS::ECS::Cluster',
+            Properties: {
+                ClusterName: cf.join(['tak-vpc-', cf.ref('Environment'), '-coturn']),
+                ClusterSettings: [{
+                    Name: 'containerInsights',
+                    Value: 'enhanced'
+                }]
+            }
+        },
         Logs: {
             Type: 'AWS::Logs::LogGroup',
             Properties: {
@@ -54,10 +76,9 @@ export default {
                 RetentionInDays: 7
             }
         },
-        CoturnTaskRole: {
+        CoturnExecRole: {
             Type: 'AWS::IAM::Role',
             Properties: {
-                RoleName: cf.stackName,
                 AssumeRolePolicyDocument: {
                     Version: '2012-10-17',
                     Statement: [{
@@ -68,10 +89,64 @@ export default {
                         Action: 'sts:AssumeRole'
                     }]
                 },
+                Policies: [{
+                    PolicyName: cf.join([cf.stackName, '-exec-logging']),
+                    PolicyDocument: {
+                        Statement: [{
+                            Effect: 'Allow',
+                            Action: [
+                                'logs:CreateLogGroup',
+                                'logs:CreateLogStream',
+                                'logs:PutLogEvents',
+                                'logs:DescribeLogStreams'
+                            ],
+                            Resource: [cf.join(['arn:', cf.partition, ':logs:*:*:*'])]
+                        }]
+                    }
+                }],
                 ManagedPolicyArns: [
-                    cf.join(['arn:', cf.partition, ':iam::aws:policy/CloudWatchLogsFullAccess']),
-                    cf.join(['arn:', cf.partition, ':iam::aws:policy/SecretsManagerReadWrite'])
-                ]
+                    cf.join(['arn:', cf.partition, ':iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'])
+                ],
+                Path: '/service-role/'
+            }
+        },
+        CoturnTaskRole: {
+            Type: 'AWS::IAM::Role',
+            Properties: {
+                AssumeRolePolicyDocument: {
+                    Version: '2012-10-17',
+                    Statement: [{
+                        Effect: 'Allow',
+                        Principal: {
+                            Service: 'ecs-tasks.amazonaws.com'
+                        },
+                        Action: 'sts:AssumeRole'
+                    }]
+                },
+                Policies: [{
+                    PolicyName: cf.join('-', [cf.stackName, 'task-policy']),
+                    PolicyDocument: {
+                        Statement: [{
+                            Effect: 'Allow',
+                            Action: [
+                                'ssmmessages:CreateControlChannel',
+                                'ssmmessages:CreateDataChannel',
+                                'ssmmessages:OpenControlChannel',
+                                'ssmmessages:OpenDataChannel'
+                            ],
+                            Resource: '*'
+                        },{
+                            Effect: 'Allow',
+                            Action: [
+                                'logs:CreateLogGroup',
+                                'logs:CreateLogStream',
+                                'logs:PutLogEvents',
+                                'logs:DescribeLogStreams'
+                            ],
+                            Resource: [cf.join(['arn:', cf.partition, ':logs:*:*:*'])]
+                        }]
+                    }
+                }]
             }
         },
         CoturnSecurityGroup: {
@@ -104,11 +179,15 @@ export default {
             Type: 'AWS::ECS::TaskDefinition',
             Properties: {
                 Family: cf.stackName,
-                Cpu: 2048,
-                Memory: 4000,
+                Cpu: 1024,
+                Memory: 3584,
                 NetworkMode: 'host',
                 RequiresCompatibilities: ['EC2'],
-                ExecutionRoleArn: cf.getAtt('CoturnTaskRole', 'Arn'),
+                RuntimePlatform: {
+                    CpuArchitecture: 'ARM64',
+                    OperatingSystemFamily: 'LINUX'
+                },
+                ExecutionRoleArn: cf.getAtt('CoturnExecRole', 'Arn'),
                 TaskRoleArn: cf.getAtt('CoturnTaskRole', 'Arn'),
                 ContainerDefinitions: [{
                     Name: cf.stackName,
@@ -158,7 +237,11 @@ export default {
         ELBEIPSubnetA: {
             Type: 'AWS::EC2::EIP',
             Properties: {
-                Domain: 'vpc'
+                Domain: 'vpc',
+                Tags: [{
+                    Key: 'Name',
+                    Value: cf.join([cf.stackName, '-subnet-a'])
+                }]
             }
         },
         ContainerInstanceRole: {
@@ -209,23 +292,52 @@ export default {
                 LaunchTemplateName: cf.stackName,
                 LaunchTemplateData: {
                     ImageId: cf.ref('ECSOptimizedAMI'),
-                    InstanceType: 't4g.medium',
+                    InstanceType: cf.ref('InstanceType'),
                     IamInstanceProfile: {
                         Arn: cf.getAtt('ContainerInstanceProfile', 'Arn')
                     },
-                    SecurityGroupIds: [cf.ref('CoturnSecurityGroup')],
-                    UserData: cf.base64(cf.sub([
+                    MetadataOptions: {
+                        HttpEndpoint: 'enabled',
+                        HttpTokens: 'required'
+                    },
+                    NetworkInterfaces: [{
+                        DeviceIndex: 0,
+                        AssociatePublicIpAddress: true,
+                        Groups: [cf.ref('CoturnSecurityGroup')]
+                    }],
+                    UserData: cf.base64(cf.sub(
                         fs.readFileSync(new URL('./coturn.sh', import.meta.url), 'utf8'),
                         {
                             AllocationId: cf.getAtt('ELBEIPSubnetA', 'AllocationId'),
-                            ClusterName: cf.join(['tak-vpc-', cf.ref('Environment'), '-media'])
+                            ClusterName: cf.join(['tak-vpc-', cf.ref('Environment'), '-coturn'])
                         }
-                    ]))
+                    )),
+                    TagSpecifications: [{
+                        ResourceType: 'instance',
+                        Tags: [{
+                            Key: 'Name',
+                            Value: cf.stackName
+                        }]
+                    },{
+                        ResourceType: 'volume',
+                        Tags: [{
+                            Key: 'Name',
+                            Value: cf.stackName
+                        }]
+                    }]
                 }
             }
         },
         CoturnAutoScalingGroup: {
             Type: 'AWS::AutoScaling::AutoScalingGroup',
+            UpdatePolicy: {
+                AutoScalingRollingUpdate: {
+                    MinInstancesInService: 0,
+                    MaxBatchSize: 1,
+                    WaitOnResourceSignals: false,
+                    PauseTime: 'PT5M'
+                }
+            },
             Properties: {
                 AutoScalingGroupName: cf.stackName,
                 VPCZoneIdentifier: [
@@ -233,6 +345,7 @@ export default {
                     cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-subnet-public-b']))
                 ],
                 HealthCheckType: 'EC2',
+                HealthCheckGracePeriod: 300,
                 MinSize: 1,
                 MaxSize: 3,
                 DesiredCapacity: 1,
@@ -244,9 +357,67 @@ export default {
                     Key: 'Name',
                     Value: cf.join('-', [cf.stackName, 'asg']),
                     PropagateAtLaunch: true
+                },{
+                    Key: 'AmazonECSManaged',
+                    Value: 'true',
+                    PropagateAtLaunch: true
                 }]
             },
             DependsOn: ['CoturnLaunchTemplate']
+        },
+        CoturnCapacityProvider: {
+            Type: 'AWS::ECS::CapacityProvider',
+            Properties: {
+                Name: cf.stackName,
+                AutoScalingGroupProvider: {
+                    AutoScalingGroupArn: cf.ref('CoturnAutoScalingGroup'),
+                    ManagedScaling: {
+                        Status: 'ENABLED',
+                        TargetCapacity: 100,
+                        MinimumScalingStepSize: 1,
+                        MaximumScalingStepSize: 1,
+                        InstanceWarmupPeriod: 300
+                    },
+                    ManagedTerminationProtection: 'DISABLED'
+                },
+                Tags: [{
+                    Key: 'Name',
+                    Value: cf.stackName
+                }]
+            }
+        },
+        CoturnClusterCapacityProviderAssociation: {
+            Type: 'AWS::ECS::ClusterCapacityProviderAssociations',
+            Properties: {
+                Cluster: cf.ref('CoturnCluster'),
+                CapacityProviders: [
+                    cf.ref('CoturnCapacityProvider')
+                ],
+                DefaultCapacityProviderStrategy: [{
+                    CapacityProvider: cf.ref('CoturnCapacityProvider'),
+                    Weight: 1
+                }]
+            }
+        },
+        CoturnService: {
+            Type: 'AWS::ECS::Service',
+            DependsOn: ['CoturnClusterCapacityProviderAssociation'],
+            Properties: {
+                ServiceName: cf.stackName,
+                Cluster: cf.ref('CoturnCluster'),
+                TaskDefinition: cf.ref('CoturnTaskDefinition'),
+                CapacityProviderStrategy: [{
+                    CapacityProvider: cf.ref('CoturnCapacityProvider'),
+                    Weight: 1
+                }],
+                PropagateTags: 'SERVICE',
+                EnableExecuteCommand: cf.ref('EnableExecute'),
+                DesiredCount: 1,
+                DeploymentConfiguration: {
+                    MinimumHealthyPercent: 100,
+                    MaximumPercent: 200
+                }
+            }
         },
         CoturnSecret: {
             Type: 'AWS::SecretsManager::Secret',
@@ -266,6 +437,14 @@ export default {
         CoturnEIP: {
             Description: 'COTURN EIP Address',
             Value: cf.ref('ELBEIPSubnetA')
+        },
+        CoturnCluster: {
+            Description: 'ECS cluster running the COTURN service',
+            Value: cf.ref('CoturnCluster')
+        },
+        CoturnCapacityProvider: {
+            Description: 'ECS capacity provider used by the COTURN service',
+            Value: cf.ref('CoturnCapacityProvider')
         }
     }
 }
