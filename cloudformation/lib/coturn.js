@@ -205,7 +205,7 @@ export default {
                         { Name: 'Environment', Value: cf.ref('Environment') },
                         { Name: 'TURN_SECRET', Value: cf.sub('{{resolve:secretsmanager:tak-cloudtak-${Environment}/coturn/secret:SecretString::AWSCURRENT}}') },
                         { Name: 'TURN_REALM', Value: cf.join(['turn.', cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-hosted-zone-name']))]) },
-                        { Name: 'EXTERNAL_IP', Value: cf.ref('ELBEIPSubnetA') },
+                        { Name: 'EXTERNAL_IP', Value: cf.getAtt('ELBEIPSubnetA', 'PublicIp') },
                         { Name: 'AWS_DEFAULT_REGION', Value: cf.region },
                         { Name: 'AWS_REGION', Value: cf.region }
                     ],
