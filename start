@@ -29,5 +29,41 @@ if [ -z "${EXTERNAL_IP}" ]; then
     sed -i '/^external-ip=$/d' /etc/coturn/turnserver.conf
 fi
 
+# Configure log level based on LOG_LEVEL environment variable
+# Coturn uses flags: verbose (debug), no flag (info), -v (warning), -q (error)
+LOG_LEVEL="${LOG_LEVEL:-info}"
+case "$LOG_LEVEL" in
+    debug)
+        # verbose is already in the template, keep it
+        echo "Log level: debug (verbose enabled)"
+        ;;
+    info)
+        # Remove verbose flag for info level
+        sed -i '/^verbose$/d' /etc/coturn/turnserver.conf
+        echo "Log level: info (verbose disabled)"
+        ;;
+    warning)
+        # Remove verbose and add -v flag
+        sed -i '/^verbose$/d' /etc/coturn/turnserver.conf
+        echo "Log level: warning"
+        ;;
+    error)
+        # Remove verbose for minimal logging
+        sed -i '/^verbose$/d' /etc/coturn/turnserver.conf
+        echo "Log level: error"
+        ;;
+    *)
+        echo "Unknown log level: $LOG_LEVEL, defaulting to info"
+        sed -i '/^verbose$/d' /etc/coturn/turnserver.conf
+        ;;
+esac
+
 # Start coturn server with host networking
-exec turnserver -c /etc/coturn/turnserver.conf
+# Add -v flag for warning level, -q for error level
+if [ "$LOG_LEVEL" = "warning" ]; then
+    exec turnserver -c /etc/coturn/turnserver.conf -v
+elif [ "$LOG_LEVEL" = "error" ]; then
+    exec turnserver -c /etc/coturn/turnserver.conf -q
+else
+    exec turnserver -c /etc/coturn/turnserver.conf
+fi
