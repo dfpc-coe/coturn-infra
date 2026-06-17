@@ -26,7 +26,11 @@ envsubst '${TURN_SECRET} ${TURN_REALM} ${EXTERNAL_IP}' \
 
 # Drop the external-ip directive entirely if no public IP could be resolved.
 if [ -z "${EXTERNAL_IP}" ]; then
+    echo "WARNING: EXTERNAL_IP is not set - relay candidates will use the bind address."
+    echo "WARNING: WebRTC NAT traversal will NOT work without a public external-ip."
     sed -i '/^external-ip=$/d' /etc/coturn/turnserver.conf
+else
+    echo "Using EXTERNAL_IP for relay candidates: ${EXTERNAL_IP}"
 fi
 
 # Configure log level based on LOG_LEVEL environment variable
