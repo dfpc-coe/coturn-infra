@@ -12,6 +12,10 @@
 
 ### Pending Release
 
+### v1.0.1 - 2026-07-23
+
+- :arrow_up: Update Core Deps
+
 ### v1.0.0 - 2026-06-08
 
 - :tada: Initial release of @tak-ps/coturn
