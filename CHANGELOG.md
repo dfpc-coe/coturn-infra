@@ -12,6 +12,10 @@
 
 ### Pending Release
 
+### v1.1.0 - 2026-10-22
+
+- :rocket: Move Secrets from `Environment` section to `Secrets`
+
 ### v1.0.1 - 2026-07-23
 
 - :arrow_up: Update Core Deps

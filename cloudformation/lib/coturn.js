@@ -101,6 +101,14 @@ export default {
                                 'logs:DescribeLogStreams'
                             ],
                             Resource: [cf.join(['arn:', cf.partition, ':logs:*:*:*'])]
+                        },{
+                            Effect: 'Allow',
+                            Action: ['secretsmanager:GetSecretValue'],
+                            Resource: [cf.ref('CoturnSecret')]
+                        },{
+                            Effect: 'Allow',
+                            Action: ['kms:Decrypt'],
+                            Resource: [cf.getAtt('KMS', 'Arn')]
                         }]
                     }
                 }],
@@ -203,11 +211,13 @@ export default {
                         { Name: 'StackName', Value: cf.stackName },
                         { Name: 'LOG_LEVEL', Value: cf.ref('LogLevel') },
                         { Name: 'Environment', Value: cf.ref('Environment') },
-                        { Name: 'TURN_SECRET', Value: cf.sub('{{resolve:secretsmanager:tak-cloudtak-${Environment}/coturn/secret:SecretString::AWSCURRENT}}') },
                         { Name: 'TURN_REALM', Value: cf.join(['turn.', cf.importValue(cf.join(['tak-vpc-', cf.ref('Environment'), '-hosted-zone-name']))]) },
                         { Name: 'EXTERNAL_IP', Value: cf.getAtt('ELBEIPSubnetA', 'PublicIp') },
                         { Name: 'AWS_DEFAULT_REGION', Value: cf.region },
                         { Name: 'AWS_REGION', Value: cf.region }
+                    ],
+                    Secrets: [
+                        { Name: 'TURN_SECRET', ValueFrom: cf.ref('CoturnSecret') }
                     ],
                     LogConfiguration: {
                         LogDriver: 'awslogs',
