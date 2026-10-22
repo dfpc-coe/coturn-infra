@@ -12,7 +12,7 @@
 
 ### Pending Release
 
-### v1.1.0 - 2026-10-22
+### v1.2.0 - 2026-10-22
 
 - :rocket: Move Secrets from `Environment` section to `Secrets`
 
